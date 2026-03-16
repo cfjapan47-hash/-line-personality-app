@@ -9,14 +9,14 @@ interface AnswerResultProps {
   answeredCount: number;
   totalQuestions: number;
   mbtiScore: MBTIScore;
-  onClose: () => void;
+  onNext: () => void;
 }
 
 export default function AnswerResult({
   answeredCount,
   totalQuestions,
   mbtiScore,
-  onClose,
+  onNext,
 }: AnswerResultProps) {
   const progress = getDiagnosisProgress(answeredCount, totalQuestions);
 
@@ -32,10 +32,6 @@ export default function AnswerResult({
         <h2 className="text-xl font-bold text-gray-800 mb-2">
           回答完了!
         </h2>
-
-        <p className="text-gray-500 mb-6">
-          今日の質問に回答しました
-        </p>
 
         {/* 進捗バー */}
         <div className="mb-6">
@@ -86,10 +82,10 @@ export default function AnswerResult({
         )}
 
         <Button
-          onClick={onClose}
+          onClick={onNext}
           className="w-full bg-[#06C755] hover:bg-[#04a847] text-white rounded-xl py-6 text-base"
         >
-          閉じる
+          次の質問へ
         </Button>
       </CardContent>
     </Card>

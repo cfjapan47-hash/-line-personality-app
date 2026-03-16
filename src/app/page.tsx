@@ -7,9 +7,10 @@ import ProfileSummary from "@/components/ProfileSummary";
 import { Question, QuestionOption, MBTIScore, MBTIType } from "@/types/question";
 import { createEmptyScore, addScore, calcMBTIType, isDiagnosisComplete } from "@/lib/mbti-calculator";
 import { selectTodayQuestion } from "@/lib/question-selector";
+import { getGreeting } from "@/lib/greetings";
 import { diagnosisQuestions } from "@/data/diagnosis-questions";
 
-type ViewState = "loading" | "question" | "answered" | "profile" | "already_answered";
+type ViewState = "loading" | "greeting" | "question" | "answered" | "profile" | "complete";
 
 export default function Home() {
   const [view, setView] = useState<ViewState>("loading");
@@ -17,9 +18,26 @@ export default function Home() {
   const [mbtiScore, setMbtiScore] = useState<MBTIScore>(createEmptyScore());
   const [mbtiType, setMbtiType] = useState<MBTIType | null>(null);
   const [answeredIds, setAnsweredIds] = useState<string[]>([]);
-  const [justCompleted, setJustCompleted] = useState(false);
+  const [greeting, setGreeting] = useState("");
+  const [justCompletedDiagnosis, setJustCompletedDiagnosis] = useState(false);
 
   const totalQuestions = diagnosisQuestions.length;
+
+  const loadNextQuestion = useCallback((
+    type: MBTIType | null,
+    ids: string[],
+    complete: boolean,
+    diagnosisJustDone: boolean
+  ) => {
+    const nextQ = selectTodayQuestion(type, ids, complete);
+    if (nextQ) {
+      setQuestion(nextQ);
+      setGreeting(getGreeting(ids.length, diagnosisJustDone));
+      setView("greeting");
+    } else {
+      setView("complete");
+    }
+  }, []);
 
   const loadState = useCallback(() => {
     const saved = localStorage.getItem("personality_state");
@@ -35,23 +53,11 @@ export default function Home() {
       setMbtiScore(score);
       setMbtiType(type);
       setAnsweredIds(ids);
-
-      const today = new Date().toDateString();
-      if (state.lastAnswerDate === today) {
-        setView("already_answered");
-        return;
-      }
     }
 
     const complete = isDiagnosisComplete(ids.length, totalQuestions);
-    const nextQ = selectTodayQuestion(type, ids, complete);
-    if (nextQ) {
-      setQuestion(nextQ);
-      setView("question");
-    } else {
-      setView("already_answered");
-    }
-  }, [totalQuestions]);
+    loadNextQuestion(type, ids, complete, false);
+  }, [totalQuestions, loadNextQuestion]);
 
   useEffect(() => {
     loadState();
@@ -63,19 +69,21 @@ export default function Home() {
     const newIds = [...answeredIds, question.questionId];
     let newScore = mbtiScore;
     let newType = mbtiType;
+    let diagnosisJustDone = false;
 
     if (question.phase === "diagnosis" && option.score) {
       newScore = addScore(mbtiScore, option.score);
       setMbtiScore(newScore);
 
-      if (isDiagnosisComplete(newIds.length, totalQuestions)) {
+      if (!mbtiType && isDiagnosisComplete(newIds.length, totalQuestions)) {
         newType = calcMBTIType(newScore);
         setMbtiType(newType);
-        setJustCompleted(true);
+        diagnosisJustDone = true;
       }
     }
 
     setAnsweredIds(newIds);
+    setJustCompletedDiagnosis(diagnosisJustDone);
 
     localStorage.setItem(
       "personality_state",
@@ -83,20 +91,20 @@ export default function Home() {
         mbtiScore: newScore,
         mbtiType: newType,
         answeredIds: newIds,
-        lastAnswerDate: new Date().toDateString(),
       })
     );
 
-    setView("answered");
+    if (diagnosisJustDone) {
+      setView("profile");
+    } else {
+      setView("answered");
+    }
   };
 
-  const handleClose = () => {
-    if (justCompleted && mbtiType) {
-      setView("profile");
-      setJustCompleted(false);
-    } else {
-      setView("already_answered");
-    }
+  const handleNext = () => {
+    const complete = isDiagnosisComplete(answeredIds.length, totalQuestions);
+    loadNextQuestion(mbtiType, answeredIds, complete, justCompletedDiagnosis);
+    setJustCompletedDiagnosis(false);
   };
 
   const handleReset = () => {
@@ -104,7 +112,8 @@ export default function Home() {
     setMbtiScore(createEmptyScore());
     setMbtiType(null);
     setAnsweredIds([]);
-    setJustCompleted(false);
+    setJustCompletedDiagnosis(false);
+    setGreeting(getGreeting(0, false));
     loadState();
   };
 
@@ -126,12 +135,27 @@ export default function Home() {
         </div>
       )}
 
-      {view === "question" && question && (
-        <QuestionCard
-          question={question}
-          questionNumber={answeredIds.length + 1}
-          onAnswer={handleAnswer}
-        />
+      {view === "greeting" && question && (
+        <div className="w-full max-w-md mx-auto">
+          {/* フリートーク風挨拶 */}
+          <div className="mb-4 flex items-start gap-3">
+            <div className="flex-shrink-0 w-10 h-10 bg-[#06C755] rounded-full flex items-center justify-center text-white text-lg">
+              C
+            </div>
+            <div className="bg-white rounded-2xl rounded-tl-sm shadow-sm px-4 py-3 max-w-[85%]">
+              <p className="text-gray-700 text-sm leading-relaxed">{greeting}</p>
+            </div>
+          </div>
+
+          {/* 少し間を置いて質問カードを表示 */}
+          <div className="mt-4 animate-fade-in">
+            <QuestionCard
+              question={question}
+              questionNumber={answeredIds.length + 1}
+              onAnswer={handleAnswer}
+            />
+          </div>
+        </div>
       )}
 
       {view === "answered" && (
@@ -139,27 +163,34 @@ export default function Home() {
           answeredCount={answeredIds.length}
           totalQuestions={totalQuestions}
           mbtiScore={mbtiScore}
-          onClose={handleClose}
+          onNext={handleNext}
         />
       )}
 
       {view === "profile" && mbtiType && (
-        <ProfileSummary mbtiType={mbtiType} mbtiScore={mbtiScore} />
+        <div className="w-full max-w-md mx-auto">
+          <ProfileSummary mbtiType={mbtiType} mbtiScore={mbtiScore} />
+          <button
+            onClick={handleNext}
+            className="w-full mt-4 bg-[#06C755] hover:bg-[#04a847] text-white rounded-xl py-4 text-base font-medium transition-colors"
+          >
+            次の質問へ進む
+          </button>
+        </div>
       )}
 
-      {view === "already_answered" && (
+      {view === "complete" && (
         <div className="w-full max-w-md mx-auto text-center">
-          <div className="w-20 h-20 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-            <svg className="w-10 h-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <div className="w-20 h-20 mx-auto mb-4 bg-green-100 rounded-full flex items-center justify-center">
+            <svg className="w-10 h-10 text-[#06C755]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
           <h2 className="text-xl font-bold text-gray-700 mb-2">
-            今日の質問は完了です
+            すべての質問が完了しました！
           </h2>
           <p className="text-gray-500 mb-4">
-            また明日の質問をお楽しみに!
+            ありがとうございます。あなたのプロフィールが完成しました。
           </p>
           {mbtiType && (
             <button
@@ -169,8 +200,8 @@ export default function Home() {
               性格プロフィールを見る
             </button>
           )}
-          <p className="text-gray-300 text-sm mb-2">
-            {answeredIds.length} / {totalQuestions} 問回答済み
+          <p className="text-gray-300 text-sm">
+            {answeredIds.length} 問回答済み
           </p>
         </div>
       )}
